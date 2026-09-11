@@ -1,0 +1,7 @@
+{
+  "name": "Legal Metrology Compliance Checker",
+  "description": "Automated scanning, label analysis, and compliance verification platform for packaged commodities under the Legal Metrology (Packaged Commodities) Rules, 2011.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

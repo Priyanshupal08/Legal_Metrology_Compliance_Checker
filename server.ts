@@ -17,7 +17,16 @@ app.get('/api/health', (req, res) => {
 
 app.post('/api/analyze', async (req, res) => {
   try {
-    const { imageBase64, mimeType, additionalContext, backPanelBase64, sidePanelBase64, macroBase64, dimensions } = req.body;
+    const {
+      imageBase64,
+      mimeType,
+      additionalContext,
+      backPanelBase64,
+      sidePanelBase64,
+      macroBase64,
+      additionalImages,
+      dimensions,
+    } = req.body;
     if (!imageBase64) {
       return res.status(400).json({ error: 'imageBase64 is required' });
     }
@@ -26,6 +35,7 @@ app.post('/api/analyze', async (req, res) => {
       backPanelBase64: backPanelBase64 || additionalContext?.backPanelBase64,
       sidePanelBase64: sidePanelBase64 || additionalContext?.sidePanelBase64,
       macroBase64: macroBase64 || additionalContext?.macroBase64,
+      additionalImages: additionalImages || additionalContext?.additionalImages,
       dimensions: dimensions || additionalContext?.dimensions,
     };
     const result = await analyzePackageWithGemini(imageBase64, mimeType || 'image/jpeg', options);

@@ -534,64 +534,141 @@ export const ComplianceReportView: React.FC<ComplianceReportViewProps> = ({
       {/* Tab 2: Extracted Label Data */}
       {activeTab === 'data' && (
         <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xs space-y-6">
-          <h3 className="text-base font-bold text-slate-900">Extracted Packaging Declarations</h3>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Extracted Packaging Declarations</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Verbatim information extracted across all packaging angles and statutory panels
+              </p>
+            </div>
+            {report.brandName && (
+              <span className="text-xs font-bold text-slate-700 bg-slate-100 px-3 py-1 rounded-full w-fit">
+                Brand: <span className="text-emerald-700">{report.brandName}</span>
+              </span>
+            )}
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-              <span className="text-slate-500 font-medium">Product / Commodity Name</span>
-              <p className="text-sm font-bold text-slate-900">{report.declarations.commodityName.value || 'Not Detected'}</p>
+              <span className="text-slate-500 font-medium">Common / Generic Commodity</span>
+              <p className="text-sm font-bold text-slate-900">{report.declarations.commodityName.value || report.productName || 'Not Detected'}</p>
+              {report.declarations.commodityName.rawText && (
+                <p className="text-[11px] text-slate-500 italic">"{report.declarations.commodityName.rawText}"</p>
+              )}
             </div>
 
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
               <span className="text-slate-500 font-medium">Net Weight / Volume</span>
               <p className="text-sm font-bold text-slate-900">
-                {report.declarations.netQuantity.numericValue ? `${report.declarations.netQuantity.numericValue} ${report.declarations.netQuantity.declaredUnit || ''}` : report.declarations.netQuantity.value || 'Not Detected'}
+                {report.declarations.netQuantity.numericValue
+                  ? `${report.declarations.netQuantity.numericValue} ${report.declarations.netQuantity.declaredUnit || ''}`
+                  : report.declarations.netQuantity.value || 'Not Detected'}
+              </p>
+              <p className="text-[11px] text-slate-500">
+                Metric Standard: {report.declarations.netQuantity.isStandardUnit ? 'Yes (Rule 11)' : 'Non-Compliant'}
               </p>
             </div>
 
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-              <span className="text-slate-500 font-medium">Maximum Retail Price</span>
+              <span className="text-slate-500 font-medium">Maximum Retail Price (MRP)</span>
               <p className="text-sm font-bold text-slate-900">
-                {report.declarations.mrp.mrpAmount ? `₹ ${report.declarations.mrp.mrpAmount}` : report.declarations.mrp.value ? `₹ ${report.declarations.mrp.value}` : 'N/A'}
+                {report.declarations.mrp.value
+                  ? (report.declarations.mrp.value.trim().startsWith('₹') || report.declarations.mrp.value.trim().startsWith('Rs')
+                      ? report.declarations.mrp.value
+                      : `₹ ${report.declarations.mrp.value}`)
+                  : (report.declarations.mrp.mrpAmount ? `₹ ${report.declarations.mrp.mrpAmount.toFixed(2)}` : 'Not Detected')}
+              </p>
+              <p className="text-[11px] text-slate-500">
+                {report.declarations.mrp.inclusiveOfAllTaxes ? 'Incl. all taxes declared' : 'Missing tax phrase'}
               </p>
             </div>
 
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-              <span className="text-slate-500 font-medium">Unit Sale Price</span>
+              <span className="text-slate-500 font-medium">Unit Sale Price (USP)</span>
               <p className="text-sm font-bold text-slate-900">
-                {report.declarations.unitSalePrice.value || (report.declarations.unitSalePrice.unitPriceAmount ? `₹ ${report.declarations.unitSalePrice.unitPriceAmount} ${report.declarations.unitSalePrice.unitBasis || ''}` : 'Missing')}
+                {report.declarations.unitSalePrice.value ||
+                  (report.declarations.unitSalePrice.unitPriceAmount
+                    ? `₹ ${report.declarations.unitSalePrice.unitPriceAmount} ${report.declarations.unitSalePrice.unitBasis || ''}`
+                    : 'Not Declared on Label')}
+              </p>
+              <p className="text-[11px] text-slate-500">
+                Mandatory under Rule 6(10)
               </p>
             </div>
 
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-              <span className="text-slate-500 font-medium">Manufacturing Date</span>
-              <p className="text-sm font-bold text-slate-900">{report.declarations.dateOfManufactureOrPacking.value || 'N/A'}</p>
+              <span className="text-slate-500 font-medium">Date of Packing / Mfg</span>
+              <p className="text-sm font-bold text-slate-900">{report.declarations.dateOfManufactureOrPacking.value || 'Not Detected'}</p>
+              <p className="text-[11px] text-slate-500">Rule 6(1)(d)</p>
             </div>
 
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
               <span className="text-slate-500 font-medium">Country of Origin</span>
               <p className="text-sm font-bold text-slate-900">{report.declarations.countryOfOrigin.country || report.declarations.countryOfOrigin.value || 'India'}</p>
+              <p className="text-[11px] text-slate-500">Rule 6(1)(n)</p>
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1 md:col-span-2">
-              <span className="text-slate-500 font-medium">Manufacturer / Packer Address</span>
-              <p className="text-sm font-semibold text-slate-900">{report.declarations.manufacturerDetails.value || 'N/A'}</p>
-            </div>
+            {report.declarations.batchOrLotNumber?.value && (
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                <span className="text-slate-500 font-medium">Batch / Lot Number</span>
+                <p className="text-sm font-bold text-slate-900">{report.declarations.batchOrLotNumber.value}</p>
+                <p className="text-[11px] text-slate-500">Rule 6(1)(g)</p>
+              </div>
+            )}
+
+            {report.declarations.fssaiNumber?.value && (
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                <span className="text-slate-500 font-medium">FSSAI License Number</span>
+                <p className="text-sm font-bold font-mono text-slate-900">{report.declarations.fssaiNumber.value}</p>
+                <p className="text-[11px] text-slate-500">Food Safety Standard</p>
+              </div>
+            )}
 
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
               <span className="text-slate-500 font-medium">Postal PIN Code</span>
               <p className="text-sm font-bold text-slate-900">
                 {report.declarations.manufacturerDetails.pinCodeDeclared ? 'Declared (Compliant)' : 'Missing PIN Code'}
               </p>
+              <p className="text-[11px] text-slate-500">Required under Rule 6(1)(a)</p>
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1 md:col-span-3">
-              <span className="text-slate-500 font-medium">Consumer Grievance Helpline &amp; Email</span>
-              <p className="text-sm font-semibold text-slate-900">
-                {report.declarations.consumerCare.telephoneNumber || 'No phone'} • {report.declarations.consumerCare.emailId || 'No email'} • {report.declarations.consumerCare.fullAddress || report.declarations.consumerCare.contactPersonDesignation || ''}
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1 md:col-span-2 lg:col-span-3">
+              <span className="text-slate-500 font-medium">Manufacturer / Packer Physical Address</span>
+              <p className="text-sm font-semibold text-slate-900 leading-relaxed">
+                {report.declarations.manufacturerDetails.value || 'Not Detected'}
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1 md:col-span-2 lg:col-span-3">
+              <span className="text-slate-500 font-medium">Consumer Grievance Helpline, Email &amp; Office</span>
+              <p className="text-sm font-semibold text-slate-900 leading-relaxed">
+                {report.declarations.consumerCare.value ||
+                  [
+                    report.declarations.consumerCare.telephoneNumber ? `Phone: ${report.declarations.consumerCare.telephoneNumber}` : null,
+                    report.declarations.consumerCare.emailId ? `Email: ${report.declarations.consumerCare.emailId}` : null,
+                    report.declarations.consumerCare.fullAddress ? `Address: ${report.declarations.consumerCare.fullAddress}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' • ') || 'Not Detected'}
               </p>
             </div>
           </div>
+
+          {/* Complete Verbatim OCR Text Transcription Section */}
+          {report.notes && (
+            <div className="mt-6 pt-6 border-t border-slate-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-emerald-600" />
+                  Verbatim Inspection Notes &amp; Raw OCR Text
+                </span>
+                <span className="text-[10px] text-slate-500 font-medium">Evidence Audit Trail</span>
+              </div>
+              <div className="p-4 rounded-xl bg-slate-900 text-slate-200 text-xs font-mono leading-relaxed whitespace-pre-wrap max-h-80 overflow-y-auto border border-slate-800 shadow-inner select-text">
+                {report.notes}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -699,6 +776,25 @@ export const ComplianceReportView: React.FC<ComplianceReportViewProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Extra Supporting Panels if provided */}
+          {report.images.supportingImages && report.images.supportingImages.length > 0 && (
+            <div className="pt-4 border-t border-slate-100 space-y-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700 block">
+                Additional Investigated Angles ({report.images.supportingImages.length})
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                {report.images.supportingImages.map((imgUrl, i) => (
+                  <div key={i} className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50 p-2 space-y-1">
+                    <span className="text-[10px] font-semibold text-slate-500">Angle {i + 1}</span>
+                    <div className="aspect-square rounded-lg overflow-hidden bg-white flex items-center justify-center">
+                      <img src={imgUrl} alt={`Supporting angle ${i + 1}`} className="max-h-full max-w-full object-contain" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

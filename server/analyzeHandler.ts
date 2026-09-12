@@ -27,7 +27,16 @@ export async function handleAnalyzeRequest(
       }
 
       const parsed = JSON.parse(rawBody);
-      const { imageBase64, mimeType, additionalContext, backPanelBase64, macroBase64, dimensions } = parsed;
+      const {
+        imageBase64,
+        mimeType,
+        additionalContext,
+        backPanelBase64,
+        sidePanelBase64,
+        macroBase64,
+        additionalImages,
+        dimensions,
+      } = parsed;
 
       if (!imageBase64) {
         res.statusCode = 400;
@@ -39,7 +48,9 @@ export async function handleAnalyzeRequest(
       const options = {
         ...additionalContext,
         backPanelBase64: backPanelBase64 || additionalContext?.backPanelBase64,
+        sidePanelBase64: sidePanelBase64 || additionalContext?.sidePanelBase64,
         macroBase64: macroBase64 || additionalContext?.macroBase64,
+        additionalImages: additionalImages || additionalContext?.additionalImages,
         dimensions: dimensions || additionalContext?.dimensions,
       };
 

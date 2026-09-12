@@ -11,6 +11,7 @@ export interface AnalyzeOptions {
   backPanelBase64?: string;
   sidePanelBase64?: string;
   macroBase64?: string;
+  additionalImages?: string[];
   dimensions?: { widthCm: number; heightCm: number };
   inspectorInfo?: {
     name?: string;
@@ -20,34 +21,61 @@ export interface AnalyzeOptions {
   };
 }
 
+export const getApiBaseUrl = (): string => {
+  if (typeof window !== 'undefined' && window.location) {
+    // In standard browser environment (including localhost and web preview), always use relative URL
+    if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+      return '';
+    }
+    // In Capacitor native APK runtime (file: or capacitor: protocol)
+    if (window.location.protocol === 'file:' || window.location.protocol === 'capacitor:') {
+      const customUrl = (import.meta as any).env?.VITE_BACKEND_URL || localStorage.getItem('lmpc_backend_url');
+      if (customUrl) {
+        return customUrl.replace(/\/+$/, '');
+      }
+      return 'https://ais-dev-lhvfebdm7nj4qrv53ujxln-335689196672.asia-southeast1.run.app';
+    }
+  }
+  return '';
+};
+
 export async function analyzeProductImage(
   imageBase64: string,
   mimeType: string,
   meta?: AnalyzeOptions
 ): Promise<InspectionResult> {
-  const res = await fetch('/api/analyze', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      imageBase64,
-      mimeType: mimeType || 'image/jpeg',
-      additionalContext: meta,
-      backPanelBase64: meta?.backPanelBase64,
-      sidePanelBase64: meta?.sidePanelBase64,
-      macroBase64: meta?.macroBase64,
-      dimensions: meta?.dimensions,
-    }),
-  });
+  const apiUrl = `${getApiBaseUrl()}/api/analyze`;
+  try {
+    const res = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        imageBase64,
+        mimeType: mimeType || 'image/jpeg',
+        additionalContext: meta,
+        backPanelBase64: meta?.backPanelBase64,
+        sidePanelBase64: meta?.sidePanelBase64,
+        macroBase64: meta?.macroBase64,
+        additionalImages: meta?.additionalImages,
+        dimensions: meta?.dimensions,
+      }),
+    });
 
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data || !data.success || !data.result) {
-    const errorMsg = data?.error || `Server analysis failed with HTTP status ${res.status}`;
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data && data.success && data.result) {
+      return data.result;
+    }
+    const errorMsg = data?.error || `Server inspection failed with status ${res.status} (${res.statusText || 'Error'})`;
+    console.error('LMPC analysis server error:', errorMsg);
     throw new Error(errorMsg);
+  } catch (netErr: any) {
+    console.error('LMPC analysis network/execution error:', netErr);
+    throw new Error(
+      netErr?.message || 'Failed to inspect package image. Please verify your connection to the analysis server and try again.'
+    );
   }
-
-  return data.result;
 }
 
 /**

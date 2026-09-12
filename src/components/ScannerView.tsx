@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
 import {
   Camera,
   Upload,
@@ -54,11 +56,12 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
 }) => {
   const [sourceMode, setSourceMode] = useState<IngestMode>('camera');
 
-  // Multi-panel captured evidence (4 statutory slots)
+  // Multi-panel captured evidence (4 statutory slots + extra supporting angles)
   const [frontImage, setFrontImage] = useState<string | null>(null);
   const [backImage, setBackImage] = useState<string | null>(null);
   const [sideImage, setSideImage] = useState<string | null>(null);
   const [macroImage, setMacroImage] = useState<string | null>(null);
+  const [supportingImages, setSupportingImages] = useState<string[]>([]);
   const [activeSlot, setActiveSlot] = useState<TargetSlot>('pdp');
 
   // Inspection metadata - automatically allocated reference ID
@@ -94,10 +97,66 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
     };
   }, []);
 
+  const takeNativePhoto = async () => {
+    try {
+      const photo = await CapCamera.getPhoto({
+        quality: 92,
+        allowEditing: false,
+        resultType: CameraResultType.DataUrl,
+        source: CameraSource.Camera,
+      });
+
+      if (photo?.dataUrl) {
+        setIsFlashing(true);
+        setTimeout(() => setIsFlashing(false), 140);
+
+        if (activeSlot === 'pdp') {
+          setFrontImage(photo.dataUrl);
+          setCaptureNotice('Front Label captured! Moving to Back Panel.');
+          setActiveSlot('back');
+          setDocketNumber(generateInspectionReferenceId());
+        } else if (activeSlot === 'back') {
+          setBackImage(photo.dataUrl);
+          setCaptureNotice('Back Panel captured! Moving to Side / Flap Panel.');
+          setActiveSlot('side');
+        } else if (activeSlot === 'side') {
+          setSideImage(photo.dataUrl);
+          setCaptureNotice('Side Panel captured! Moving to Close-Up Detail.');
+          setActiveSlot('macro');
+        } else {
+          setMacroImage(photo.dataUrl);
+          setCaptureNotice('Close-Up Detail captured! All slots ready.');
+        }
+        setTimeout(() => setCaptureNotice(null), 3000);
+      }
+    } catch (err: any) {
+      console.warn('Native camera capture skipped or error:', err);
+    }
+  };
+
   const startCamera = async (target: TargetSlot = 'pdp') => {
     setActiveSlot(target);
     setCameraError(null);
     setIsCameraActive(true);
+
+    // 1. Native Android Permission check when running inside APK
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const check = await CapCamera.checkPermissions();
+        if (check.camera !== 'granted') {
+          const req = await CapCamera.requestPermissions({ permissions: ['camera'] });
+          if (req.camera !== 'granted') {
+            setCameraError(
+              'Camera permission was not granted. Please allow Camera permission in your phone Settings > Apps.'
+            );
+            setIsCameraActive(false);
+            return;
+          }
+        }
+      } catch (capErr) {
+        console.warn('Capacitor native permission check error:', capErr);
+      }
+    }
 
     if (
       streamRef.current &&
@@ -140,9 +199,13 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
           await videoRef.current.play();
         }
       } catch (fallbackErr: any) {
-        setCameraError(
-          fallbackErr?.message || 'Unable to access camera device. Please check permissions or upload photos.'
-        );
+        if (Capacitor.isNativePlatform()) {
+          setCameraError('Inline video not available. Tap to use System Camera.');
+        } else {
+          setCameraError(
+            fallbackErr?.message || 'Unable to access camera device. Please check permissions or upload photos.'
+          );
+        }
         setIsCameraActive(false);
       }
     }
@@ -176,6 +239,11 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
   };
 
   const captureFrame = () => {
+    if (Capacitor.isNativePlatform() && (!streamRef.current || !videoRef.current)) {
+      takeNativePhoto();
+      return;
+    }
+
     if (!videoRef.current || !canvasRef.current) return;
 
     setIsFlashing(true);
@@ -246,7 +314,8 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
     backImg?: string | null,
     sideImg?: string | null,
     macroImg?: string | null,
-    referenceId?: string
+    referenceId?: string,
+    extraImages?: string[]
   ) => {
     setScanError(null);
     setIsScanning(true);
@@ -265,17 +334,19 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
       setScanStep('Verifying text size and readability across all mandatory features...');
     }, 3600);
 
+    const extrasToPass = extraImages ?? supportingImages;
+
     try {
       const result = await analyzeProductImage(
         primaryImg,
         primaryImg.startsWith('data:image/svg') ? 'image/svg+xml' : 'image/jpeg',
         {
-          productName: 'Scanned Packaged Commodity',
           category: commodityCategory,
           packageType,
           backPanelBase64: backImg && backImg !== primaryImg ? backImg : undefined,
           sidePanelBase64: sideImg && sideImg !== primaryImg ? sideImg : undefined,
           macroBase64: macroImg && macroImg !== primaryImg ? macroImg : undefined,
+          additionalImages: extrasToPass.length > 0 ? extrasToPass : undefined,
           inspectorInfo: {
             name: officerName,
             badgeId: allocatedId,
@@ -292,12 +363,19 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
       }
 
       // Attach all captured packaging panels to the result images
+      const allSupporting: string[] = [
+        ...(backImg && backImg !== primaryImg ? [backImg] : []),
+        ...(sideImg && sideImg !== primaryImg ? [sideImg] : []),
+        ...(macroImg && macroImg !== primaryImg ? [macroImg] : []),
+        ...extrasToPass,
+      ];
+
       result.images = {
         pdpImage: primaryImg,
         backPanelImage: backImg || undefined,
         sidePanelImage: sideImg || undefined,
         mrpStampImage: macroImg || undefined,
-        supportingImages: [backImg, sideImg, macroImg].filter((x): x is string => !!x && x !== primaryImg),
+        supportingImages: allSupporting,
       };
 
       onScanComplete(result);
@@ -339,16 +417,19 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
       let back: string | null = null;
       let side: string | null = null;
       let macro: string | null = null;
+      let extras: string[] = [];
 
       if (dataUrls.length >= 4) {
         primary = dataUrls[0];
         back = dataUrls[1];
         side = dataUrls[2];
         macro = dataUrls[3];
+        extras = dataUrls.slice(4);
         setFrontImage(dataUrls[0]);
         setBackImage(dataUrls[1]);
         setSideImage(dataUrls[2]);
         setMacroImage(dataUrls[3]);
+        setSupportingImages(extras);
         setActiveSlot('macro');
       } else if (dataUrls.length === 3) {
         primary = dataUrls[0];
@@ -357,12 +438,14 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
         setFrontImage(dataUrls[0]);
         setBackImage(dataUrls[1]);
         setSideImage(dataUrls[2]);
+        setSupportingImages([]);
         setActiveSlot('side');
       } else if (dataUrls.length === 2) {
         primary = dataUrls[0];
         back = dataUrls[1];
         setFrontImage(dataUrls[0]);
         setBackImage(dataUrls[1]);
+        setSupportingImages([]);
         setActiveSlot('back');
       } else {
         // 1 picture uploaded
@@ -401,7 +484,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
       setDocketNumber(allocatedId);
 
       // Automatically proceed with the analysis of the product
-      await runAnalysisWithImages(primary, back, side, macro, allocatedId);
+      await runAnalysisWithImages(primary, back, side, macro, allocatedId, extras);
     } catch (err) {
       console.error('Packaging photo processing failed:', err);
       setScanError('Failed to read selected photos. Please try again.');
@@ -438,7 +521,8 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
       backImage && backImage !== primaryImg ? backImage : undefined,
       sideImage && sideImage !== primaryImg ? sideImage : undefined,
       macroImage && macroImage !== primaryImg ? macroImage : undefined,
-      allocatedId
+      allocatedId,
+      supportingImages
     );
   };
 
@@ -665,6 +749,8 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                       setBackImage(null);
                       setSideImage(null);
                       setMacroImage(null);
+                      setSupportingImages([]);
+                      setScanError(null);
                     }}
                     className="text-[10px] font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2 py-0.5 rounded cursor-pointer transition-colors"
                     title="Clear all staged photos"
@@ -1053,8 +1139,22 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                   </div>
 
                   {cameraError && (
-                    <div className="text-xs text-rose-300 max-w-xs bg-rose-950/50 px-3 py-2 rounded-xl border border-rose-800/60">
-                      {cameraError}
+                    <div className="space-y-2 flex flex-col items-center">
+                      <div className="text-xs text-rose-300 max-w-xs bg-rose-950/50 px-3 py-2 rounded-xl border border-rose-800/60">
+                        {cameraError}
+                      </div>
+                      {Capacitor.isNativePlatform() && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            takeNativePhoto();
+                          }}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full text-xs font-semibold shadow-sm transition-all cursor-pointer pointer-events-auto"
+                        >
+                          Use System Camera
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

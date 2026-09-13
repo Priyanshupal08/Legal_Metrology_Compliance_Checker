@@ -37,9 +37,17 @@ export const getStoredBackendUrl = (): string => {
   return '';
 };
 
+export const normalizeUrl = (raw: string): string => {
+  let clean = raw.trim().replace(/\/+$/, '');
+  if (clean && !clean.startsWith('http://') && !clean.startsWith('https://')) {
+    clean = `http://${clean}`;
+  }
+  return clean;
+};
+
 export const setStoredBackendUrl = (url: string): void => {
   if (typeof window !== 'undefined' && window.localStorage) {
-    const clean = url.trim().replace(/\/+$/, '');
+    const clean = normalizeUrl(url);
     if (clean) {
       localStorage.setItem('lmpc_backend_url', clean);
     } else {
@@ -78,7 +86,8 @@ export const getApiBaseUrl = (): string => {
 export async function testBackendConnection(
   targetUrl?: string
 ): Promise<{ ok: boolean; message: string; hasGeminiKey?: boolean }> {
-  const base = (targetUrl !== undefined ? targetUrl : getApiBaseUrl()).replace(/\/+$/, '');
+  const raw = targetUrl !== undefined ? targetUrl : getApiBaseUrl();
+  const base = normalizeUrl(raw);
   const testUrl = `${base}/api/health`;
 
   try {

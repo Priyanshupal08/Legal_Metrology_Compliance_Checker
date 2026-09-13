@@ -42,6 +42,27 @@ if (fs.existsSync(manifestPath)) {
     console.log('✔ Enabled usesCleartextTraffic in AndroidManifest.xml');
   }
 
+  // Create network_security_config.xml to explicitly allow cleartext to all local hosts
+  const xmlDir = path.join(androidDir, 'app', 'src', 'main', 'res', 'xml');
+  if (!fs.existsSync(xmlDir)) {
+    fs.mkdirSync(xmlDir, { recursive: true });
+  }
+  const netSecPath = path.join(xmlDir, 'network_security_config.xml');
+  const netSecContent = `<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
+`;
+  fs.writeFileSync(netSecPath, netSecContent, 'utf8');
+  if (!content.includes('android:networkSecurityConfig=')) {
+    content = content.replace('<application', '<application android:networkSecurityConfig="@xml/network_security_config"');
+    console.log('✔ Linked networkSecurityConfig in AndroidManifest.xml');
+  }
+
   fs.writeFileSync(manifestPath, content, 'utf8');
 }
 

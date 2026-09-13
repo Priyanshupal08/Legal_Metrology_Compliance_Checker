@@ -19,12 +19,17 @@ import {
   Package,
   MapPin,
   Barcode,
+  QrCode,
+  Globe,
+  RefreshCw,
   HelpCircle,
   Sparkles,
 } from 'lucide-react';
 import { InspectionResult, UserRole } from '../types/compliance';
 import { safeExtractSvg } from '../utils/svgHelper';
 import { downloadCsv, downloadJson } from '../utils/fileExport';
+import { verifyLiveQrEndpoint } from '../utils/qrEngine';
+import { verifyBarcodeProvenance } from '../utils/barcodeEngine';
 
 interface ComplianceReportViewProps {
   report: InspectionResult;
@@ -45,8 +50,10 @@ export const ComplianceReportView: React.FC<ComplianceReportViewProps> = ({
   onOpenRemediation,
   onOpenWeightToleranceTest,
 }) => {
-  const [activeTab, setActiveTab] = useState<'features' | 'data' | 'readability' | 'photos'>('features');
+  const [activeTab, setActiveTab] = useState<'features' | 'data' | 'readability' | 'photos' | 'provenance'>('features');
   const [showLegalRef, setShowLegalRef] = useState<boolean>(false);
+  const [isAuditingQr, setIsAuditingQr] = useState<boolean>(false);
+  const [qrAuditLiveResult, setQrAuditLiveResult] = useState<any>(null);
 
   const isCompliant = report.overallVerdict === 'COMPLIANT';
   const isSerious = report.overallVerdict === 'SERIOUS_VIOLATION';
@@ -436,6 +443,24 @@ export const ComplianceReportView: React.FC<ComplianceReportViewProps> = ({
             <Layers className="w-4 h-4" />
             <span>Packaging Photos</span>
           </button>
+
+          <button
+            id="tab-btn-provenance"
+            onClick={() => setActiveTab('provenance')}
+            className={`pb-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'provenance'
+                ? 'border-emerald-600 text-emerald-700'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Barcode className="w-4 h-4" />
+            <span>Barcode &amp; QR Provenance</span>
+            {report.declarations.barcodeVerification?.provenanceMatchStatus === 'SUSPECTED_MISMATCH' && (
+              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black bg-rose-100 text-rose-800">
+                MISMATCH
+              </span>
+            )}
+          </button>
         </nav>
 
         {/* Legal Reference Toggle */}
@@ -797,6 +822,249 @@ export const ComplianceReportView: React.FC<ComplianceReportViewProps> = ({
           )}
         </div>
       )}
+
+      {/* Tab 5: Barcode & Smart QR Provenance Verification */}
+      {activeTab === 'provenance' && (() => {
+        const barcodeVer =
+          report.declarations.barcodeVerification ||
+          verifyBarcodeProvenance(
+            report.declarations.barcode?.value || '',
+            report.declarations.countryOfOrigin?.country || report.declarations.countryOfOrigin?.value || '',
+            report.declarations.manufacturerDetails?.value || ''
+          );
+
+        const qrCodeValue = report.declarations.qrCode?.value || '';
+
+        const handleLiveQrAudit = async () => {
+          if (!qrCodeValue) return;
+          setIsAuditingQr(true);
+          try {
+            const res = await verifyLiveQrEndpoint(qrCodeValue);
+            setQrAuditLiveResult(res);
+          } catch (err: any) {
+            setQrAuditLiveResult({
+              tested: true,
+              ok: false,
+              isAccessible: false,
+              error: err?.message || 'Failed to crawl QR destination URL',
+            });
+          } finally {
+            setIsAuditingQr(false);
+          }
+        };
+
+        return (
+          <div className="space-y-6">
+            {/* 1. Barcode & GS1 Origin Cross-Verifier */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-2xs space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-100 pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                      Rule 6(1)(n) &amp; Section 36
+                    </span>
+                    <span className="text-xs font-semibold text-slate-500">
+                      GS1 General Specifications
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900 mt-1 flex items-center gap-2">
+                    <Barcode className="w-5 h-5 text-blue-600" />
+                    Packaging Barcode (EAN-13 / GTIN) &amp; Origin Cross-Verifier
+                  </h3>
+                </div>
+
+                <span
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold shrink-0 ${
+                    barcodeVer.provenanceMatchStatus === 'VERIFIED_MATCH'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : barcodeVer.provenanceMatchStatus === 'SUSPECTED_MISMATCH'
+                      ? 'bg-rose-100 text-rose-800'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}
+                >
+                  {barcodeVer.provenanceMatchStatus === 'VERIFIED_MATCH' ? (
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  ) : barcodeVer.provenanceMatchStatus === 'SUSPECTED_MISMATCH' ? (
+                    <XCircle className="w-3.5 h-3.5" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                  )}
+                  {barcodeVer.provenanceMatchStatus === 'VERIFIED_MATCH'
+                    ? 'ORIGIN MATCH CONFIRMED'
+                    : barcodeVer.provenanceMatchStatus === 'SUSPECTED_MISMATCH'
+                    ? 'PROVENANCE MISMATCH DETECTED'
+                    : 'VERIFIED'}
+                </span>
+              </div>
+
+              {/* Status Banner */}
+              <div
+                className={`p-4 rounded-xl border text-xs leading-relaxed ${
+                  barcodeVer.provenanceMatchStatus === 'VERIFIED_MATCH'
+                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                    : barcodeVer.provenanceMatchStatus === 'SUSPECTED_MISMATCH'
+                    ? 'bg-rose-50/70 border-rose-200 text-rose-900'
+                    : 'bg-slate-50 border-slate-200 text-slate-700'
+                }`}
+              >
+                <div className="font-bold mb-1">Inspector Observation:</div>
+                <p>{barcodeVer.observation}</p>
+              </div>
+
+              {/* Data Metric Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-100">
+                  <span className="text-slate-500 block mb-1">Detected Barcode</span>
+                  <strong className="font-mono text-slate-900 text-sm block">
+                    {barcodeVer.rawCode || barcodeVer.barcodeNumber || 'None detected'}
+                  </strong>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-100">
+                  <span className="text-slate-500 block mb-1">GS1 Country Prefix</span>
+                  <strong className="font-mono text-blue-600 text-sm block">
+                    {barcodeVer.prefix || 'N/A'}
+                  </strong>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-100">
+                  <span className="text-slate-500 block mb-1">Issuing Member Org</span>
+                  <strong className="text-slate-900 text-sm block">
+                    {barcodeVer.countryOfIssuance || 'Unknown'}
+                  </strong>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-100">
+                  <span className="text-slate-500 block mb-1">Modulo-10 Checksum</span>
+                  <strong
+                    className={`text-sm block ${
+                      barcodeVer.isCheckDigitValid ? 'text-emerald-700 font-bold' : 'text-rose-700 font-bold'
+                    }`}
+                  >
+                    {barcodeVer.isCheckDigitValid ? 'Valid (Match)' : 'Checksum Failure'}
+                  </strong>
+                </div>
+              </div>
+
+              {/* Modulo-10 Check Calculation Details */}
+              <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-2 text-xs">
+                <span className="font-bold text-slate-700 block uppercase tracking-wider text-[11px]">
+                  GS1 Modulo-10 Math Audit
+                </span>
+                <div className="flex flex-wrap items-center justify-between gap-3 font-mono bg-slate-50 p-2.5 rounded-lg">
+                  <div>
+                    <span className="text-slate-500">Calculated Last Digit: </span>
+                    <strong className="text-slate-900">{barcodeVer.calculatedCheckDigit}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Printed Last Digit: </span>
+                    <strong className={barcodeVer.isCheckDigitValid ? 'text-emerald-700' : 'text-rose-700'}>
+                      {barcodeVer.actualCheckDigit}
+                    </strong>
+                  </div>
+                  <div className="text-slate-500 text-[11px]">
+                    Statutory Rule: {barcodeVer.legalCitation}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Smart QR & 2022 Digital Declaration Verifier */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-2xs space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-100 pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+                      Notification G.S.R. 540(E)
+                    </span>
+                    <span className="text-xs font-semibold text-slate-500">
+                      July 14, 2022 Electronic Exemption
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900 mt-1 flex items-center gap-2">
+                    <QrCode className="w-5 h-5 text-indigo-600" />
+                    Smart QR Code &amp; Digital Declaration Exemption Auditor
+                  </h3>
+                </div>
+
+                {qrCodeValue && (
+                  <button
+                    id="btn-audit-report-qr"
+                    onClick={handleLiveQrAudit}
+                    disabled={isAuditingQr}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition-colors disabled:opacity-50 shrink-0"
+                  >
+                    {isAuditingQr ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Globe className="w-3.5 h-3.5" />
+                    )}
+                    {isAuditingQr ? 'Auditing URL...' : 'Audit Digital Shelf Live'}
+                  </button>
+                )}
+              </div>
+
+              {/* QR Payload Details */}
+              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 text-xs space-y-2">
+                <span className="font-bold text-slate-700 block">QR Code Content / Landing Target:</span>
+                <p className="font-mono text-slate-900 break-all bg-white p-2.5 rounded-lg border border-slate-200">
+                  {qrCodeValue || 'No QR code was detected in the photographed label angles.'}
+                </p>
+              </div>
+
+              {/* Physical Packaging Safeguard Card */}
+              <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 text-xs text-emerald-950 space-y-1">
+                <div className="flex items-center gap-2 font-bold text-emerald-900">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  Physical Label Safeguard Check (Anti-Circumvention)
+                </div>
+                <p>
+                  Under Notification G.S.R. 540(E), MRP, Net Quantity, Commodity Generic Name, and Consumer Care Contact details CANNOT be relegated solely to a QR code. They are verified on the physical carton.
+                </p>
+              </div>
+
+              {/* Live Crawler Results if triggered */}
+              {qrAuditLiveResult && (
+                <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/50 text-xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-indigo-950">Live URL Verification Results:</span>
+                    <span
+                      className={`font-bold px-2 py-0.5 rounded-full ${
+                        qrAuditLiveResult.isAccessible
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-rose-100 text-rose-800'
+                      }`}
+                    >
+                      HTTP {qrAuditLiveResult.httpStatus || 'Error'} • {qrAuditLiveResult.isAccessible ? 'Accessible' : 'Unreachable'}
+                    </span>
+                  </div>
+
+                  {qrAuditLiveResult.detectedDeclarations && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
+                      <div className="flex items-center justify-between p-2 bg-white rounded border border-indigo-100">
+                        <span>Manufacturer Address:</span>
+                        <strong>{qrAuditLiveResult.detectedDeclarations.manufacturerNameAndAddress ? '✅ Found' : '❌ Missing'}</strong>
+                      </div>
+                      <div className="flex items-center justify-between p-2 bg-white rounded border border-indigo-100">
+                        <span>Generic Commodity Name:</span>
+                        <strong>{qrAuditLiveResult.detectedDeclarations.commonGenericName ? '✅ Found' : '❌ Missing'}</strong>
+                      </div>
+                      <div className="flex items-center justify-between p-2 bg-white rounded border border-indigo-100">
+                        <span>Technical Dimensions / Size:</span>
+                        <strong>{qrAuditLiveResult.detectedDeclarations.sizeAndDimensions ? '✅ Found' : '❌ Missing'}</strong>
+                      </div>
+                      <div className="flex items-center justify-between p-2 bg-white rounded border border-indigo-100">
+                        <span>Consumer Care Contact:</span>
+                        <strong>{qrAuditLiveResult.detectedDeclarations.consumerCareDetails ? '✅ Found' : '❌ Missing'}</strong>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

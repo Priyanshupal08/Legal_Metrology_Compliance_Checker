@@ -21,35 +21,129 @@ export interface AnalyzeOptions {
   };
 }
 
+export const isNativeApkRuntime = (): boolean => {
+  if (typeof window === 'undefined' || !window.location) return false;
+  return (
+    window.location.protocol === 'file:' ||
+    window.location.protocol === 'capacitor:' ||
+    Boolean((window as any).Capacitor?.isNativePlatform?.())
+  );
+};
+
+export const getStoredBackendUrl = (): string => {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    return localStorage.getItem('lmpc_backend_url') || '';
+  }
+  return '';
+};
+
+export const setStoredBackendUrl = (url: string): void => {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const clean = url.trim().replace(/\/+$/, '');
+    if (clean) {
+      localStorage.setItem('lmpc_backend_url', clean);
+    } else {
+      localStorage.removeItem('lmpc_backend_url');
+    }
+  }
+};
+
 export const getApiBaseUrl = (): string => {
   if (typeof window !== 'undefined' && window.location) {
-    // In standard browser environment (including localhost and web preview), always use relative URL
+    // 1. Check if user configured a custom backend URL
+    const stored = getStoredBackendUrl();
+    if (stored) {
+      return stored;
+    }
+
+    // 2. Check if a build-time backend URL is provided via environment
+    const envUrl = (import.meta as any).env?.VITE_BACKEND_URL;
+    if (envUrl) {
+      return envUrl.replace(/\/+$/, '');
+    }
+
+    // 3. In standard browser environment (web preview or desktop browser), use relative URL
     if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
       return '';
     }
-    // In Capacitor native APK runtime (file: or capacitor: protocol)
-    if (window.location.protocol === 'file:' || window.location.protocol === 'capacitor:') {
-      const customUrl = (import.meta as any).env?.VITE_BACKEND_URL || localStorage.getItem('lmpc_backend_url');
-      if (customUrl) {
-        return customUrl.replace(/\/+$/, '');
-      }
-      return 'https://ais-dev-lhvfebdm7nj4qrv53ujxln-335689196672.asia-southeast1.run.app';
+
+    // 4. In native APK runtime (file: or capacitor:), default to local adb reverse port
+    if (isNativeApkRuntime()) {
+      return 'http://localhost:3000';
     }
   }
   return '';
 };
+
+export async function testBackendConnection(
+  targetUrl?: string
+): Promise<{ ok: boolean; message: string; hasGeminiKey?: boolean }> {
+  const base = (targetUrl !== undefined ? targetUrl : getApiBaseUrl()).replace(/\/+$/, '');
+  const testUrl = `${base}/api/health`;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    const res = await fetch(testUrl, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('text/html') || res.url.includes('__cookie_check')) {
+      return {
+        ok: false,
+        message:
+          'Redirected to AI Studio development sandbox authentication. The Android APK cannot authenticate to this URL. Connect to your local PC server or a deployed host instead.',
+      };
+    }
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        message: `Server returned HTTP ${res.status} (${res.statusText || 'Error'})`,
+      };
+    }
+
+    const data = await res.json();
+    return {
+      ok: true,
+      message: data.hasGeminiKey
+        ? 'Connected! Backend server is online and Gemini Vision API is ready.'
+        : 'Connected! Server is online, but GEMINI_API_KEY is not defined in server environment.',
+      hasGeminiKey: data.hasGeminiKey,
+    };
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      return {
+        ok: false,
+        message: 'Connection timed out after 8 seconds. Verify the server is running and the device is on the same network.',
+      };
+    }
+    return {
+      ok: false,
+      message: err?.message || 'Unable to connect to backend server. Check IP and port.',
+    };
+  }
+}
 
 export async function analyzeProductImage(
   imageBase64: string,
   mimeType: string,
   meta?: AnalyzeOptions
 ): Promise<InspectionResult> {
-  const apiUrl = `${getApiBaseUrl()}/api/analyze`;
+  const baseUrl = getApiBaseUrl();
+  const apiUrl = `${baseUrl}/api/analyze`;
+
   try {
     const res = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        Accept: 'application/json',
       },
       body: JSON.stringify({
         imageBase64,
@@ -63,17 +157,38 @@ export async function analyzeProductImage(
       }),
     });
 
-    const data = await res.json().catch(() => ({}));
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('text/html') || res.url.includes('__cookie_check') || res.url.includes('google.com/accounts')) {
+      throw new Error(
+        'APK_SANDBOX_AUTH_REDIRECT: The analysis request was redirected to the AI Studio web login screen. The standalone Android APK cannot access the interactive dev sandbox directly. Please point the app to your local PC server (e.g., http://192.168.x.x:3000 or http://localhost:3000 via adb) or a deployed backend URL.'
+      );
+    }
+
+    let data: any = null;
+    try {
+      data = await res.json();
+    } catch {
+      // Non-JSON response
+    }
+
     if (res.ok && data && data.success && data.result) {
       return data.result;
     }
-    const errorMsg = data?.error || `Server inspection failed with status ${res.status} (${res.statusText || 'Error'})`;
-    console.error('LMPC analysis server error:', errorMsg);
-    throw new Error(errorMsg);
+
+    if (data && data.error) {
+      throw new Error(data.error);
+    }
+
+    if (!res.ok) {
+      throw new Error(`Server inspection failed with status ${res.status} (${res.statusText || 'Error'})`);
+    }
+
+    throw new Error('Server returned an empty or malformed response. Please verify the analysis server.');
   } catch (netErr: any) {
-    console.error('LMPC analysis network/execution error:', netErr);
+    console.error('LMPC analysis execution error:', netErr);
     throw new Error(
-      netErr?.message || 'Failed to inspect package image. Please verify your connection to the analysis server and try again.'
+      netErr?.message ||
+        'Failed to inspect package image. Please verify your connection to the analysis server and try again.'
     );
   }
 }

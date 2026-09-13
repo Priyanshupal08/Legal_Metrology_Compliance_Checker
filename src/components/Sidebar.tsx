@@ -13,10 +13,26 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
+  Barcode,
+  QrCode,
 } from 'lucide-react';
 import { UserRole } from '../types/compliance';
 
-export type AppPage = 'scan' | 'studio' | 'report' | 'tools' | 'cases' | 'dashboard' | 'handbook';
+export type AppPage =
+  | 'scan'
+  | 'studio'
+  | 'report'
+  | 'barcode'
+  | 'qr'
+  | 'tool-font'
+  | 'tool-usp'
+  | 'tool-mpe'
+  | 'tool-penalty'
+  | 'tool-server'
+  | 'tools'
+  | 'cases'
+  | 'dashboard'
+  | 'handbook';
 
 interface SidebarProps {
   activePage: AppPage;
@@ -97,13 +113,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ],
     },
     {
+      title: 'Packaging & Provenance',
+      items: [
+        {
+          id: 'barcode' as AppPage,
+          label: 'Barcode Origin Verifier',
+          icon: Barcode,
+          badge: 'GS1 Math',
+          badgeColor: 'bg-blue-900/80 text-blue-300 border border-blue-700/50',
+          disabled: false,
+        },
+        {
+          id: 'qr' as AppPage,
+          label: 'Smart QR Auditor',
+          icon: QrCode,
+          badge: 'G.S.R. 540(E)',
+          badgeColor: 'bg-indigo-900/80 text-indigo-300 border border-indigo-700/50',
+          disabled: false,
+        },
+      ],
+    },
+    {
       title: 'Tools & Reference',
       items: [
         {
           id: 'tools' as AppPage,
           label: 'Calculators & Checkers',
           icon: Calculator,
-          badge: '4 Tools',
+          badge: '7 Tools',
           badgeColor: 'bg-slate-700 text-slate-300',
           disabled: false,
         },
@@ -121,6 +158,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // In the menu tab/drawer, remove items already present in the bottom navigation bar (Scan, Report, Studio, History, Tools)
   const navGroups = isMobileMenu
     ? [
+        {
+          title: 'Packaging & Provenance',
+          items: [
+            {
+              id: 'barcode' as AppPage,
+              label: 'Barcode Origin Verifier',
+              icon: Barcode,
+              badge: 'GS1 Math',
+              badgeColor: 'bg-blue-900/80 text-blue-300 border border-blue-700/50',
+              disabled: false,
+            },
+            {
+              id: 'qr' as AppPage,
+              label: 'Smart QR Auditor',
+              icon: QrCode,
+              badge: 'G.S.R. 540(E)',
+              badgeColor: 'bg-indigo-900/80 text-indigo-300 border border-indigo-700/50',
+              disabled: false,
+            },
+          ],
+        },
         {
           title: 'Additional Services & Guides',
           items: [
@@ -217,7 +275,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               {group.items.map((item) => {
                 const Icon = item.icon;
-                const isActive = activePage === item.id;
+                const isActive =
+                  activePage === item.id ||
+                  (item.id === 'tools' &&
+                    ['tool-font', 'tool-usp', 'tool-mpe', 'tool-penalty', 'tool-server'].includes(activePage));
                 return (
                   <button
                     key={item.id}

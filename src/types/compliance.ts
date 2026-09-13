@@ -75,7 +75,60 @@ export interface ExtractedDeclarations {
   batchOrLotNumber?: DeclarationField;
   fssaiNumber?: DeclarationField;
   barcode?: { value: string; format: string };
+  qrCode?: { value: string; type?: string };
   dimensionsOrSize?: DeclarationField;
+  barcodeVerification?: BarcodeVerificationResult;
+  smartQrVerification?: SmartQrVerificationResult;
+}
+
+export interface BarcodeVerificationResult {
+  detected: boolean;
+  rawCode: string;
+  barcodeNumber?: string;
+  symbology: 'EAN_13' | 'UPC_A' | 'EAN_8' | 'CODE_128' | 'DATA_MATRIX' | 'UNKNOWN';
+  prefix: string;
+  countryOfIssuance: string;
+  isCheckDigitValid: boolean;
+  calculatedCheckDigit?: number;
+  actualCheckDigit?: number;
+  textDeclaredOrigin?: string;
+  provenanceMatchStatus: 'VERIFIED_MATCH' | 'SUSPECTED_MISMATCH' | 'THIRD_PARTY_LICENSEE' | 'UNVERIFIABLE';
+  complianceVerdict: 'COMPLIANT' | 'VIOLATION' | 'WARNING';
+  observation: string;
+  legalCitation: string;
+}
+
+export interface SmartQrVerificationResult {
+  detected: boolean;
+  rawPayload: string;
+  payloadType: 'URL' | 'GS1_DIGITAL_LINK' | 'FSSAI_VERIFY' | 'PLAIN_TEXT' | 'UNKNOWN';
+  isUrlReachable?: boolean;
+  httpStatus?: number;
+  destinationUrl?: string;
+  isLoginPaywalled?: boolean;
+  electronicExemptionApplicable: boolean;
+  digitalDeclarationsFound?: {
+    manufacturerNameAndAddress?: boolean;
+    commonGenericName?: boolean;
+    sizeAndDimensions?: boolean;
+    countryOfOrigin?: boolean;
+    consumerCareDetails?: boolean;
+    warrantyOrCustomerGuide?: boolean;
+  };
+  mandatoryPhysicalLabelPreserved: {
+    mrpPrintedOnPack: boolean;
+    netQtyPrintedOnPack: boolean;
+    commodityNamePrintedOnPack: boolean;
+    consumerCarePrintedOnPack: boolean;
+  };
+  complianceStatus:
+    | 'COMPLIANT_WITH_EXEMPTION'
+    | 'NON_COMPLIANT_BROKEN_LINK'
+    | 'ILLEGAL_PHYSICAL_OMISSION'
+    | 'NOT_APPLICABLE'
+    | 'PENDING_VERIFICATION';
+  observation: string;
+  legalCitation: string;
 }
 
 export interface RuleEvaluationItem {

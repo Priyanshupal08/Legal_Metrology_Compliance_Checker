@@ -33,9 +33,16 @@ if (fs.existsSync(manifestPath)) {
 
   if (!content.includes('android.permission.CAMERA')) {
     content = content.replace('<application', `${cameraPerms}\n    <application`);
-    fs.writeFileSync(manifestPath, content, 'utf8');
     console.log('✔ Added camera permissions to AndroidManifest.xml');
   }
+
+  // Ensure cleartext HTTP is permitted for local network and adb connections (http://192.168.x.x or http://localhost:3000)
+  if (!content.includes('android:usesCleartextTraffic="true"')) {
+    content = content.replace('<application', '<application android:usesCleartextTraffic="true"');
+    console.log('✔ Enabled usesCleartextTraffic in AndroidManifest.xml');
+  }
+
+  fs.writeFileSync(manifestPath, content, 'utf8');
 }
 
 // 3. Fix MainActivity.java so it never crashes with NullPointer or ClassNotFound

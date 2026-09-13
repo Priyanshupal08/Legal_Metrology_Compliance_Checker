@@ -1,5 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { InspectionResult, LabelAnnotation } from '../src/types/compliance';
+import { verifyBarcodeProvenance } from '../src/utils/barcodeEngine';
+import { evaluateLmpcQrExemption } from '../src/utils/qrEngine';
 
 export interface AnalysisOptions {
   productName?: string;
@@ -296,6 +298,16 @@ Return a valid JSON object matching the exact structure below:
       "detected": boolean,
       "value": "string (14-digit FSSAI license number if food product)",
       "isCompliant": boolean
+    },
+    "barcode": {
+      "detected": boolean,
+      "value": "string (the exact numeric barcode printed on package, usually 8, 12, or 13 digits like 8901030924512)",
+      "format": "string (e.g. EAN_13, UPC_A, EAN_8)"
+    },
+    "qrCode": {
+      "detected": boolean,
+      "value": "string (the URL or text printed or encoded in any QR code visible on package)",
+      "type": "string (URL, GS1_DIGITAL_LINK, or TEXT)"
     }
   },
   "annotations": [
@@ -417,6 +429,74 @@ Return a valid JSON object matching the exact structure below:
           violationMessage: ann.violationMessage || undefined,
         }))
       : [];
+
+  // Run Barcode Provenance and Smart QR Verifications
+  const rawBarcode = parsed.declarations?.barcode?.value || '';
+  const textOrigin =
+    parsed.declarations?.countryOfOrigin?.country ||
+    parsed.declarations?.countryOfOrigin?.value ||
+    '';
+  const mfgText = parsed.declarations?.manufacturerDetails?.value || '';
+
+  const barcodeVerification = verifyBarcodeProvenance(rawBarcode, textOrigin, mfgText);
+  if (!parsed.declarations) parsed.declarations = {};
+  parsed.declarations.barcodeVerification = barcodeVerification;
+
+  const rawQr = parsed.declarations?.qrCode?.value || '';
+  const qrVerification = evaluateLmpcQrExemption(rawQr, parsed.declarations, parsed.category);
+  parsed.declarations.smartQrVerification = qrVerification;
+
+  if (!Array.isArray(parsed.rulesEvaluated)) {
+    parsed.rulesEvaluated = [];
+  }
+
+  // Inject provenance mismatch rule if detected
+  if (barcodeVerification.detected && barcodeVerification.provenanceMatchStatus === 'SUSPECTED_MISMATCH') {
+    parsed.rulesEvaluated.unshift({
+      ruleId: 'LMPC-BARCODE-PROVENANCE-MISMATCH',
+      ruleTitle: 'Barcode GS1 Country Allocation vs Label Origin Mismatch',
+      ruleClause: 'Rule 6(1)(n) read with Section 36(1)',
+      actSection: 'Section 36(1), Legal Metrology Act, 2009',
+      status: 'FAIL',
+      severity: 'CRITICAL',
+      observation: barcodeVerification.observation,
+      legalRequirement: 'Origin declared on package must strictly correspond to the registered GS1 country prefix unless explicit licensed import disclosures are printed.',
+      suggestedCorrectiveAction: 'Rectify product packaging to accurately declare true country of manufacture and legal importer details under Rule 6(1)(a).',
+      penalProvision: 'Section 36(1): Fine up to ₹25,000 for first offence, up to ₹50,000 for second offence.',
+    });
+  }
+
+  // Inject check digit failure if invalid
+  if (barcodeVerification.detected && !barcodeVerification.isCheckDigitValid) {
+    parsed.rulesEvaluated.unshift({
+      ruleId: 'LMPC-BARCODE-CHECKSUM-INVALID',
+      ruleTitle: 'GS1 Barcode Symbology Checksum Failure',
+      ruleClause: 'Rule 6(1) & General Labelling Standards',
+      actSection: 'Section 18, Legal Metrology Act, 2009',
+      status: 'FAIL',
+      severity: 'MAJOR',
+      observation: barcodeVerification.observation,
+      legalRequirement: 'All optical product barcodes must adhere to valid GS1 Modulo-10 checksum encoding.',
+      suggestedCorrectiveAction: 'Audit pre-press packaging plates and barcode generation software.',
+      penalProvision: 'Statutory compliance violation under Section 36(1).',
+    });
+  }
+
+  // Inject illegal physical omission if QR code was used improperly
+  if (qrVerification.detected && qrVerification.complianceStatus === 'ILLEGAL_PHYSICAL_OMISSION') {
+    parsed.rulesEvaluated.unshift({
+      ruleId: 'LMPC-QR-EXEMPTION-ILLEGAL-OMISSION',
+      ruleTitle: 'Illegal Omission of Physical Core Declarations under QR Exemption',
+      ruleClause: 'Notification G.S.R. 540(E) & Rule 6(1)',
+      actSection: 'Section 18 read with Section 36, Legal Metrology Act, 2009',
+      status: 'FAIL',
+      severity: 'CRITICAL',
+      observation: qrVerification.observation,
+      legalRequirement: 'MRP, Net Quantity, Commodity Name, and Consumer Care MUST be physically printed on the package. Moving them exclusively into a QR code is strictly prohibited.',
+      suggestedCorrectiveAction: 'Re-print primary packaging label with mandatory physical MRP and Net Quantity numerals.',
+      penalProvision: 'Section 36(1), Legal Metrology Act, 2009.',
+    });
+  }
 
   const inspectionResult: InspectionResult = {
     id: options?.inspectorInfo?.badgeId || ('insp-' + Date.now()),

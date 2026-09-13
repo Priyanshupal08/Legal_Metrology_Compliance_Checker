@@ -11,6 +11,17 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '25mb' }));
 
+// Enable CORS so Android native APK / mobile devices on local Wi-Fi can connect
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', hasGeminiKey: !!process.env.GEMINI_API_KEY });
 });
@@ -43,6 +54,65 @@ app.post('/api/analyze', async (req, res) => {
   } catch (err: any) {
     console.error('Error in /api/analyze:', err);
     res.status(500).json({ success: false, error: err?.message || 'Server analysis error' });
+  }
+});
+
+app.post('/api/verify-qr-url', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url || typeof url !== 'string' || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+      return res.status(400).json({ error: 'Valid URL starting with http:// or https:// is required' });
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    const targetRes = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 LMPC-Inspector/1.0',
+        Accept: 'text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.8',
+      },
+      signal: controller.signal,
+      redirect: 'follow',
+    });
+    clearTimeout(timeoutId);
+
+    const status = targetRes.status;
+    const isAccessible = status >= 200 && status < 400;
+    const text = await targetRes.text();
+    const cleanText = text
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
+      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .toLowerCase();
+
+    const detectedDeclarations = {
+      manufacturerNameAndAddress: /manufactur|pack(?:ed|er)|import(?:ed|er)|factory|address|pin\s*code|mfg|unit/i.test(cleanText),
+      commonGenericName: /product|generic|commodity|model|item|description/i.test(cleanText),
+      sizeAndDimensions: /dimension|size|weight|net\s*wt|volum|capacity|mm|cm|kg|g|ml|litre/i.test(cleanText),
+      countryOfOrigin: /origin|made\s*in|country/i.test(cleanText),
+      consumerCareDetails: /customer|care|toll|support|email|helpline|contact|phone/i.test(cleanText),
+      warrantyOrCustomerGuide: /warranty|guarantee|manual|user\s*guide|instructions/i.test(cleanText),
+    };
+
+    res.json({
+      ok: true,
+      httpStatus: status,
+      isAccessible,
+      detectedDeclarations,
+      sampleSnippet: text.substring(0, 300).replace(/<[^>]+>/g, ' ').trim(),
+    });
+  } catch (err: any) {
+    console.error('Error verifying QR URL:', err);
+    res.status(500).json({
+      ok: false,
+      httpStatus: 0,
+      isAccessible: false,
+      error: err?.message || 'Failed to fetch QR destination URL',
+    });
   }
 });
 

@@ -9,12 +9,20 @@ import { ScannerView } from './components/ScannerView';
 import { ForensicStudioView } from './components/ForensicStudioView';
 import { ComplianceReportView } from './components/ComplianceReportView';
 import { ToolsView } from './components/ToolsView';
+import { FontHeightToolView } from './components/tools/FontHeightToolView';
+import { UspCalculatorToolView } from './components/tools/UspCalculatorToolView';
+import { WeightToleranceToolView } from './components/tools/WeightToleranceToolView';
+import { PenaltyEstimatorToolView } from './components/tools/PenaltyEstimatorToolView';
+import { ServerSyncToolView } from './components/tools/ServerSyncToolView';
+import { BarcodeProvenanceView } from './components/BarcodeProvenanceView';
+import { SmartQrAuditorView } from './components/SmartQrAuditorView';
 import { RepositoryView } from './components/RepositoryView';
 import { DashboardView } from './components/DashboardView';
 import { RulebookView } from './components/RulebookView';
 import { NoticeGeneratorModal } from './components/NoticeGeneratorModal';
 import { ArtworkRemediationModal } from './components/ArtworkRemediationModal';
 import { WeightToleranceModal } from './components/WeightToleranceModal';
+import { BackendConnectionModal } from './components/BackendConnectionModal';
 import { InspectionResult, UserRole } from './types/compliance';
 import {
   getSavedInspections,
@@ -22,6 +30,8 @@ import {
   deleteInspectionFromRepository,
   clearAllInspections,
   isDummyInspection,
+  isNativeApkRuntime,
+  getStoredBackendUrl,
 } from './services/complianceEngine';
 import {
   Scale,
@@ -36,6 +46,7 @@ import {
   Calculator,
   BarChart3,
   BookOpen,
+  Server,
 } from 'lucide-react';
 
 export default function App() {
@@ -51,6 +62,7 @@ export default function App() {
   const [isNoticeModalOpen, setIsNoticeModalOpen] = useState(false);
   const [isRemediationModalOpen, setIsRemediationModalOpen] = useState(false);
   const [isWeightToleranceModalOpen, setIsWeightToleranceModalOpen] = useState(false);
+  const [isServerModalOpen, setIsServerModalOpen] = useState(false);
 
   // Initialize repository with stored items (real user inspections only)
   useEffect(() => {
@@ -113,8 +125,15 @@ export default function App() {
     scan: 'Product Scanner',
     report: 'Inspection Report',
     studio: 'Visual Label Inspector',
+    barcode: 'Packaging Barcode & Origin Verifier',
+    qr: 'Smart QR & Digital Exemption Auditor',
     cases: 'Inspection History',
     tools: 'Calculators & Checkers',
+    'tool-font': 'Font Height Calculator (Schedule II)',
+    'tool-usp': 'Unit Sale Price (USP) Calculator',
+    'tool-mpe': 'Weight Tolerance (MPE) Lab Scale',
+    'tool-penalty': 'Statutory Penalties Estimator',
+    'tool-server': 'Server & Mobile Sync Setup',
     dashboard: 'Analytics Dashboard',
     handbook: 'Standards Guide',
   };
@@ -165,6 +184,19 @@ export default function App() {
               <span className="font-bold text-slate-900 font-mono">{pageTitles[activePage]}</span>
             </div>
           </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsServerModalOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors cursor-pointer"
+              title="Configure Backend Server Endpoint"
+            >
+              <Server className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="hidden sm:inline">
+                {getStoredBackendUrl() ? 'Server: Custom' : isNativeApkRuntime() ? 'Server (APK)' : 'Server'}
+              </span>
+            </button>
+          </div>
         </header>
 
         {/* Dynamic Page Views */}
@@ -177,6 +209,7 @@ export default function App() {
               recentInspections={inspections}
               onSelectInspection={handleSelectInspection}
               onViewAllHistory={() => setActivePage('cases')}
+              onOpenServerSettings={() => setIsServerModalOpen(true)}
             />
           )}
 
@@ -239,7 +272,62 @@ export default function App() {
             )
           )}
 
-          {activePage === 'tools' && <ToolsView />}
+          {activePage === 'tools' && (
+            <ToolsView onSelectTool={(tool) => setActivePage(tool)} />
+          )}
+
+          {activePage === 'tool-font' && (
+            <FontHeightToolView
+              onBack={() => setActivePage('tools')}
+              onSelectTool={(tool) => setActivePage(tool)}
+            />
+          )}
+
+          {activePage === 'tool-usp' && (
+            <UspCalculatorToolView
+              onBack={() => setActivePage('tools')}
+              onSelectTool={(tool) => setActivePage(tool)}
+            />
+          )}
+
+          {activePage === 'tool-mpe' && (
+            <WeightToleranceToolView
+              onBack={() => setActivePage('tools')}
+              onSelectTool={(tool) => setActivePage(tool)}
+            />
+          )}
+
+          {activePage === 'tool-penalty' && (
+            <PenaltyEstimatorToolView
+              onBack={() => setActivePage('tools')}
+              onSelectTool={(tool) => setActivePage(tool)}
+            />
+          )}
+
+          {activePage === 'tool-server' && (
+            <ServerSyncToolView
+              onBack={() => setActivePage('tools')}
+              onSelectTool={(tool) => setActivePage(tool)}
+            />
+          )}
+
+          {activePage === 'barcode' && (
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+              <BarcodeProvenanceView
+                onBack={() => setActivePage('tools')}
+                onSelectTool={(tool) => setActivePage(tool)}
+              />
+            </div>
+          )}
+
+          {activePage === 'qr' && (
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+              <SmartQrAuditorView
+                onBack={() => setActivePage('tools')}
+                onSelectTool={(tool) => setActivePage(tool)}
+              />
+            </div>
+          )}
 
           {activePage === 'cases' && (
             <RepositoryView
@@ -329,12 +417,12 @@ export default function App() {
           <button
             onClick={() => setActivePage('tools')}
             className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl min-w-[54px] min-h-[44px] transition-colors cursor-pointer ${
-              activePage === 'tools'
+              activePage === 'tools' || activePage.startsWith('tool-')
                 ? 'text-emerald-700 font-bold'
                 : 'text-slate-500 hover:text-slate-800'
             }`}
           >
-            <div className={`p-1 rounded-lg ${activePage === 'tools' ? 'bg-emerald-100 text-emerald-700' : ''}`}>
+            <div className={`p-1 rounded-lg ${activePage === 'tools' || activePage.startsWith('tool-') ? 'bg-emerald-100 text-emerald-700' : ''}`}>
               <Calculator className="w-5 h-5" />
             </div>
             <span className="text-[10px] mt-0.5">Tools</span>
@@ -368,6 +456,12 @@ export default function App() {
           report={currentReport}
         />
       )}
+
+      {/* Backend Server Connection Settings Modal */}
+      <BackendConnectionModal
+        isOpen={isServerModalOpen}
+        onClose={() => setIsServerModalOpen(false)}
+      />
     </div>
   );
 }

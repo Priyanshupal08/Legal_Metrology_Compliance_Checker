@@ -3,15 +3,30 @@ import react from '@vitejs/plugin-react';
 import fs from 'fs';
 import path from 'path';
 import {defineConfig, Plugin} from 'vite';
-import {handleAnalyzeRequest} from './server/analyzeHandler.ts';
+import {handleAnalyzeRequest, handleVerifyQrUrlRequest} from './server/analyzeHandler.ts';
 
 function apiPlugin(): Plugin {
   return {
     name: 'vite-plugin-lmpc-api',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
+        // Allow mobile APK on local Wi-Fi / adb reverse
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+        if (req.method === 'OPTIONS') {
+          res.statusCode = 204;
+          res.end();
+          return;
+        }
+
         if (req.url && req.url.startsWith('/api/analyze')) {
           handleAnalyzeRequest(req, res);
+          return;
+        }
+        if (req.url && req.url.startsWith('/api/verify-qr-url')) {
+          handleVerifyQrUrlRequest(req, res);
           return;
         }
         if (req.url && req.url.startsWith('/api/health')) {

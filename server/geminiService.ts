@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { GoogleGenAI } from '@google/genai';
 import { InspectionResult, LabelAnnotation } from '../src/types/compliance';
 import { verifyBarcodeProvenance } from '../src/utils/barcodeEngine';

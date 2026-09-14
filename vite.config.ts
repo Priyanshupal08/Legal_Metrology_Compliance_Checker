@@ -1,8 +1,9 @@
+import 'dotenv/config';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import fs from 'fs';
 import path from 'path';
-import {defineConfig, Plugin} from 'vite';
+import {defineConfig, loadEnv, Plugin} from 'vite';
 import {handleAnalyzeRequest, handleVerifyQrUrlRequest} from './server/analyzeHandler.ts';
 
 function apiPlugin(): Plugin {
@@ -100,7 +101,12 @@ function aistudioMediaPlugin(): Plugin {
 }
 // LINT.ThenChange(//depot/google3/java/com/google/alkali/boq/makersuite/applet_dev_service/templates/initializers/react_theme/vite.config.ts:aistudio_media_plugin)
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode ?? 'development', process.cwd(), '');
+  if (env.GEMINI_API_KEY && !process.env.GEMINI_API_KEY) {
+    process.env.GEMINI_API_KEY = env.GEMINI_API_KEY;
+  }
+
   return {
     base: './',
     plugins: [react(), tailwindcss(), aistudioMediaPlugin(), apiPlugin()],

@@ -30,6 +30,7 @@ import {
   Server,
   Wifi,
   Settings,
+  Key,
 } from 'lucide-react';
 import { InspectionResult } from '../types/compliance';
 import {
@@ -1384,22 +1385,47 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                 <div className="flex items-center gap-2 font-bold text-rose-800">
                   <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
                   <span>
-                    {scanError.includes('APK_SANDBOX_AUTH_REDIRECT') || scanError.includes('status 200')
+                    {scanError.includes('GEMINI_API_KEY')
+                      ? 'Server Connected: Gemini API Key Required'
+                      : scanError.includes('APK_SANDBOX_AUTH_REDIRECT') || scanError.includes('status 200')
                       ? 'Android APK: Server Connection Required'
                       : 'Scan Notice'}
                   </span>
                 </div>
 
                 <p className="text-[11px] leading-relaxed text-rose-800">
-                  {scanError.includes('APK_SANDBOX_AUTH_REDIRECT') || scanError.includes('status 200')
+                  {scanError.includes('GEMINI_API_KEY')
+                    ? 'Your phone is successfully connected to your PC server! To enable AI label inspection, your PC needs a GEMINI_API_KEY in its .env file.'
+                    : scanError.includes('APK_SANDBOX_AUTH_REDIRECT') || scanError.includes('status 200')
                     ? 'The standalone Android APK cannot connect to the cloud development sandbox directly (login redirect). Please point the app to the backend server running on your computer or a deployed host.'
                     : scanError}
                 </p>
 
-                {(scanError.includes('APK_SANDBOX_AUTH_REDIRECT') ||
+                {scanError.includes('GEMINI_API_KEY') ? (
+                  <div className="p-3 bg-white/90 rounded-lg border border-amber-200 space-y-2 text-[11px] text-slate-700">
+                    <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                      <Key className="w-3.5 h-3.5 text-amber-600" />
+                      <span>How to add your API key on your PC:</span>
+                    </div>
+                    <div className="space-y-1 text-[10px] text-slate-600">
+                      <p>
+                        1. In your project folder on your PC, create or open <code className="bg-slate-100 px-1 py-0.5 rounded font-mono font-bold text-slate-800">.env</code>
+                      </p>
+                      <p>
+                        2. Add this line with your key:
+                      </p>
+                      <div className="bg-slate-900 text-emerald-400 p-2 rounded font-mono text-[10px] select-all">
+                        GEMINI_API_KEY=your_gemini_api_key_here
+                      </div>
+                      <p>
+                        3. Restart the dev server on your PC: <code className="bg-slate-100 px-1 py-0.5 rounded font-mono font-bold text-slate-800">npm run dev</code>
+                      </p>
+                    </div>
+                  </div>
+                ) : (scanError.includes('APK_SANDBOX_AUTH_REDIRECT') ||
                   scanError.includes('status 200') ||
                   scanError.includes('Failed to fetch') ||
-                  isNativeApkRuntime()) && (
+                  isNativeApkRuntime()) ? (
                   <div className="p-2.5 bg-white/80 rounded-lg border border-rose-200 space-y-1 text-[11px] text-slate-700">
                     <div className="font-bold text-slate-800 flex items-center gap-1.5">
                       <Server className="w-3 h-3 text-emerald-600" />
@@ -1412,7 +1438,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                       2. If using USB: run <code className="bg-slate-100 px-1 py-0.5 rounded font-mono">adb reverse tcp:3000 tcp:3000</code> then set URL to <strong className="text-slate-800">http://localhost:3000</strong>
                     </p>
                   </div>
-                )}
+                ) : null}
 
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   {onOpenServerSettings && (

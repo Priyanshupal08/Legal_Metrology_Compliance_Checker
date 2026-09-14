@@ -1,3 +1,4 @@
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { InspectionResult, ExtractedDeclarations, RuleEvaluationItem, ReadabilityAnalysis } from '../types/compliance';
 
 /**
@@ -90,6 +91,45 @@ export async function testBackendConnection(
   const base = normalizeUrl(raw);
   const testUrl = `${base}/api/health`;
 
+  // 1. Try native CapacitorHttp if running on native Android (bypasses WebView mixed content & CORS)
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const nativeRes = await CapacitorHttp.get({
+        url: testUrl,
+        headers: { Accept: 'application/json' },
+        connectTimeout: 8000,
+        readTimeout: 8000,
+      });
+
+      const contentType = (nativeRes.headers['content-type'] || nativeRes.headers['Content-Type'] || '') as string;
+      if (contentType.includes('text/html')) {
+        return {
+          ok: false,
+          message: 'Redirected to authentication page. Connect to your local PC server or deployed backend.',
+        };
+      }
+
+      if (nativeRes.status >= 200 && nativeRes.status < 300) {
+        const data = typeof nativeRes.data === 'string' ? JSON.parse(nativeRes.data) : nativeRes.data;
+        return {
+          ok: true,
+          message: data?.hasGeminiKey
+            ? 'Connected! Backend server is online and Gemini Vision API is ready.'
+            : 'Connected! Server is online (note: GEMINI_API_KEY is not set on PC yet).',
+          hasGeminiKey: data?.hasGeminiKey,
+        };
+      }
+
+      return {
+        ok: false,
+        message: `Server returned HTTP ${nativeRes.status}`,
+      };
+    } catch (nativeErr: any) {
+      console.warn('CapacitorHttp native ping error, trying standard fetch:', nativeErr);
+      // Fall through to standard fetch
+    }
+  }
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -147,6 +187,50 @@ export async function analyzeProductImage(
   const baseUrl = getApiBaseUrl();
   const apiUrl = `${baseUrl}/api/analyze`;
 
+  const payload = {
+    imageBase64,
+    mimeType: mimeType || 'image/jpeg',
+    additionalContext: meta,
+    backPanelBase64: meta?.backPanelBase64,
+    sidePanelBase64: meta?.sidePanelBase64,
+    macroBase64: meta?.macroBase64,
+    additionalImages: meta?.additionalImages,
+    dimensions: meta?.dimensions,
+  };
+
+  // 1. Try native CapacitorHttp if on native Android/iOS (bypasses WebView mixed-content & CORS)
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const nativeRes = await CapacitorHttp.post({
+        url: apiUrl,
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        data: payload,
+        connectTimeout: 45000,
+        readTimeout: 45000,
+      });
+
+      const data = typeof nativeRes.data === 'string' ? JSON.parse(nativeRes.data) : nativeRes.data;
+      if (nativeRes.status >= 200 && nativeRes.status < 300 && data?.success && data?.result) {
+        return data.result;
+      }
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+      if (nativeRes.status >= 400) {
+        throw new Error(`Server returned HTTP ${nativeRes.status}`);
+      }
+    } catch (nativeErr: any) {
+      console.warn('Native CapacitorHttp analysis error, attempting web fetch fallback:', nativeErr);
+      if (nativeErr?.message && !nativeErr.message.includes('not implemented')) {
+        throw nativeErr;
+      }
+    }
+  }
+
+  // 2. Browser fetch fallback
   try {
     const res = await fetch(apiUrl, {
       method: 'POST',
@@ -154,16 +238,7 @@ export async function analyzeProductImage(
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
-      body: JSON.stringify({
-        imageBase64,
-        mimeType: mimeType || 'image/jpeg',
-        additionalContext: meta,
-        backPanelBase64: meta?.backPanelBase64,
-        sidePanelBase64: meta?.sidePanelBase64,
-        macroBase64: meta?.macroBase64,
-        additionalImages: meta?.additionalImages,
-        dimensions: meta?.dimensions,
-      }),
+      body: JSON.stringify(payload),
     });
 
     const contentType = res.headers.get('content-type') || '';

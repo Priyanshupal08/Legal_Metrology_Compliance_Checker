@@ -27,7 +27,6 @@ import {
 } from 'lucide-react';
 import { InspectionResult, UserRole } from '../types/compliance';
 import { safeExtractSvg } from '../utils/svgHelper';
-import { downloadCsv, downloadJson } from '../utils/fileExport';
 import { verifyLiveQrEndpoint } from '../utils/qrEngine';
 import { verifyBarcodeProvenance } from '../utils/barcodeEngine';
 
@@ -58,29 +57,12 @@ export const ComplianceReportView: React.FC<ComplianceReportViewProps> = ({
   const isCompliant = report.overallVerdict === 'COMPLIANT';
   const isSerious = report.overallVerdict === 'SERIOUS_VIOLATION';
 
-  const exportJSON = () => {
-    downloadJson(
-      `Packaging_Inspection_${report.id}_${report.productName.replace(/\s+/g, '_')}.json`,
-      JSON.stringify(report, null, 2)
-    );
-  };
-
-  const exportCSV = () => {
-    const headers = ['Feature', 'Status', 'Declared Value', 'Inspection Finding', 'Corrective Action'];
-    const rows = mandatoryFeatureCards.map((f) => [
-      `"${f.title}"`,
-      `"${f.status}"`,
-      `"${f.value.replace(/"/g, '""')}"`,
-      `"${f.observation.replace(/"/g, '""')}"`,
-      `"${f.remediation.replace(/"/g, '""')}"`,
-    ]);
-
-    const csvContent = [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-    downloadCsv(`Packaging_Report_${report.id}.csv`, csvContent);
-  };
-
   const printReport = () => {
-    window.print();
+    try {
+      window.print();
+    } catch (err) {
+      console.error('Failed to trigger print:', err);
+    }
   };
 
   // Build the 10 core mandatory packaging feature cards
@@ -225,9 +207,9 @@ export const ComplianceReportView: React.FC<ComplianceReportViewProps> = ({
   const totalCount = mandatoryFeatureCards.length;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6 print:p-0 print:m-0">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6 print:p-0 print:m-0 bg-slate-50 min-h-screen">
       {/* Action Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 print:hidden">
+      <div id="report-action-bar" className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 print:hidden">
         <button
           onClick={onBackToScanner}
           className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-white border border-slate-200 px-3.5 py-2 rounded-xl shadow-2xs hover:bg-slate-50 transition-colors cursor-pointer w-fit"
@@ -247,15 +229,14 @@ export const ComplianceReportView: React.FC<ComplianceReportViewProps> = ({
             </button>
           )}
 
-          {!isCompliant && (
-            <button
-              onClick={onOpenNoticeGenerator}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 px-3.5 py-2 rounded-xl shadow-sm transition-colors cursor-pointer shrink-0"
-            >
-              <FileText className="w-4 h-4" />
-              <span>Generate Notice</span>
-            </button>
-          )}
+          <button
+            onClick={onOpenNoticeGenerator}
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 px-3.5 py-2 rounded-xl shadow-sm transition-colors cursor-pointer shrink-0"
+            title="Generate Statutory Notice or Official Inspection Memo"
+          >
+            <FileText className="w-4 h-4" />
+            <span>Generate Notice</span>
+          </button>
 
           {onOpenWeightToleranceTest && (
             <button
@@ -269,26 +250,11 @@ export const ComplianceReportView: React.FC<ComplianceReportViewProps> = ({
 
           <button
             onClick={printReport}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 px-3 py-2 rounded-xl shadow-2xs transition-colors cursor-pointer shrink-0"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 px-3.5 py-2 rounded-xl shadow-2xs transition-colors cursor-pointer shrink-0"
+            title="Print Inspection Report"
           >
             <Printer className="w-3.5 h-3.5 text-slate-600" />
             <span>Print</span>
-          </button>
-
-          <button
-            onClick={exportCSV}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 px-3 py-2 rounded-xl shadow-2xs transition-colors cursor-pointer shrink-0"
-          >
-            <Download className="w-3.5 h-3.5 text-slate-600" />
-            <span>CSV</span>
-          </button>
-
-          <button
-            onClick={exportJSON}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 px-3 py-2 rounded-xl shadow-2xs transition-colors cursor-pointer shrink-0"
-          >
-            <ExternalLink className="w-3.5 h-3.5 text-slate-600" />
-            <span>JSON</span>
           </button>
         </div>
       </div>

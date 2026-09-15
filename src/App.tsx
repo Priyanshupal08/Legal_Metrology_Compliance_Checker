@@ -32,6 +32,7 @@ import {
   isDummyInspection,
   isNativeApkRuntime,
   getStoredBackendUrl,
+  subscribeToInspectionUpdates,
 } from './services/complianceEngine';
 import {
   Scale,
@@ -77,6 +78,16 @@ export default function App() {
         setCurrentReport(null);
       }
     }
+
+    // Subscribe to dynamic storage updates (e.g., IndexedDB hydration or background saves)
+    const unsubscribe = subscribeToInspectionUpdates((updated) => {
+      setInspections(updated);
+      if (updated.length > 0) {
+        setCurrentReport((prev) => (!prev || isDummyInspection(prev) ? updated[0] : prev));
+      }
+    });
+
+    return unsubscribe;
   }, []);
 
   const handleClearAllInspections = () => {
@@ -88,7 +99,8 @@ export default function App() {
   const handleScanComplete = (result: InspectionResult) => {
     setCurrentReport(result);
     saveInspectionToRepository(result);
-    setInspections(getSavedInspections());
+    const updated = getSavedInspections();
+    setInspections(updated);
     // Navigate straight to Inspection Report to show all mandatory feature checks
     setActivePage('report');
   };
@@ -141,7 +153,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex font-sans selection:bg-emerald-200">
       {/* Sidebar Navigation */}
-      <div className={`${isMobileMenuOpen ? 'fixed inset-0 z-40 flex' : 'hidden md:flex'}`}>
+      <div className={`${isMobileMenuOpen ? 'fixed inset-0 z-40 flex' : 'hidden md:flex'} print:hidden`}>
         <Sidebar
           activePage={activePage}
           onSelectPage={(page) => {

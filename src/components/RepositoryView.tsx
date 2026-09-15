@@ -17,7 +17,7 @@ import {
   Camera,
 } from 'lucide-react';
 import { InspectionResult } from '../types/compliance';
-import { downloadCsv } from '../utils/fileExport';
+import { createExcelFormattedCsv, downloadCsv } from '../utils/fileExport';
 
 interface RepositoryViewProps {
   inspections: InspectionResult[];
@@ -58,36 +58,86 @@ export const RepositoryView: React.FC<RepositoryViewProps> = ({
   const nonCompliantCount = inspections.filter((x) => x.overallVerdict === 'NON_COMPLIANT').length;
   const seriousViolationCount = inspections.filter((x) => x.overallVerdict === 'SERIOUS_VIOLATION').length;
 
-  const exportAllCSV = () => {
-    const headers = [
-      'Case ID',
-      'Inspection Date',
-      'Product Name',
-      'Brand',
-      'Category',
-      'Package Type',
-      'Verdict',
-      'Score',
-      'Critical Violations',
-      'Major Violations',
-      'Case Status',
-    ];
-    const rows = filtered.map((x) => [
-      `"${x.id}"`,
-      `"${new Date(x.timestamp).toLocaleDateString('en-IN')}"`,
-      `"${x.productName.replace(/"/g, '""')}"`,
-      `"${x.brandName.replace(/"/g, '""')}"`,
-      `"${x.category}"`,
-      `"${x.packageType}"`,
-      `"${x.overallVerdict}"`,
-      `"${x.complianceScore}"`,
-      `"${x.violationsCount?.critical || 0}"`,
-      `"${x.violationsCount?.major || 0}"`,
-      `"${x.caseStatus || 'SURVEILLANCE'}"`,
-    ]);
+  const [isExporting, setIsExporting] = useState(false);
 
-    const csvContent = [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-    downloadCsv(`LMPC_Enforcement_Register_${new Date().toISOString().slice(0, 10)}.csv`, csvContent);
+  const exportAllCSV = async () => {
+    if (inspections.length === 0) {
+      alert('No inspection records available in storage to export.');
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const headers = [
+        'Case Reference ID',
+        'Inspection Date & Time',
+        'Product Name',
+        'Brand Name',
+        'Category',
+        'Package Type',
+        'Statutory Verdict',
+        'Compliance Score (%)',
+        'Declared MRP (INR)',
+        'Declared Net Quantity',
+        'Unit Sale Price (USP)',
+        'Manufacturer / Packer Details',
+        'Month & Year of Pkg / Mfg',
+        'Country of Origin',
+        'Consumer Care Contact',
+        'Batch / Lot / FSSAI',
+        'Critical Violations',
+        'Major Violations',
+        'Inspector Name',
+        'Inspector Badge',
+        'Inspection Location',
+        'Case Status',
+        'Inspector Notes',
+      ];
+
+      // Export all inspections in storage
+      const rows = inspections.map((x) => [
+        x.id,
+        new Date(x.timestamp).toLocaleString('en-IN', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        x.productName,
+        x.brandName,
+        x.category,
+        x.packageType,
+        x.overallVerdict,
+        `${x.complianceScore}%`,
+        x.declarations?.mrp?.value || 'N/A',
+        x.declarations?.netQuantity?.value || 'N/A',
+        x.declarations?.unitSalePrice?.value || 'N/A',
+        x.declarations?.manufacturerDetails?.value || 'N/A',
+        x.declarations?.dateOfManufactureOrPacking?.value || 'N/A',
+        x.declarations?.countryOfOrigin?.country || x.declarations?.countryOfOrigin?.value || 'N/A',
+        x.declarations?.consumerCare?.isCompliant
+          ? `${x.declarations.consumerCare.telephoneNumber || ''} ${x.declarations.consumerCare.emailId || ''}`.trim()
+          : x.declarations?.consumerCare?.rawText || 'Missing / Incomplete',
+        x.declarations?.batchOrLotNumber?.value || x.declarations?.fssaiNumber?.value || 'N/A',
+        x.violationsCount?.critical ?? 0,
+        x.violationsCount?.major ?? 0,
+        x.inspectorInfo?.name || 'N/A',
+        x.inspectorInfo?.badgeId || 'N/A',
+        x.inspectorInfo?.inspectionLocation || 'N/A',
+        x.caseStatus || 'SURVEILLANCE',
+        x.notes || 'Routine surveillance inspection under Legal Metrology Act, 2009',
+      ]);
+
+      const csvContent = createExcelFormattedCsv(headers, rows);
+      const filename = `LMPC_Inspection_Register_${new Date().toISOString().slice(0, 10)}.csv`;
+
+      downloadCsv(filename, csvContent);
+    } catch (err) {
+      console.error('Failed to export CSV register:', err);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -120,10 +170,12 @@ export const RepositoryView: React.FC<RepositoryViewProps> = ({
           )}
           <button
             onClick={exportAllCSV}
-            className="inline-flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+            disabled={isExporting}
+            className="inline-flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer disabled:opacity-60"
+            title="Download CSV for all stored inspections"
           >
-            <Download className="w-4 h-4 text-slate-500" />
-            Export Register (CSV)
+            <Download className={`w-4 h-4 text-slate-500 ${isExporting ? 'animate-bounce' : ''}`} />
+            <span>{isExporting ? 'Downloading...' : 'Export CSV'}</span>
           </button>
         </div>
       </div>

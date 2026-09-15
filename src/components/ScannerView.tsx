@@ -367,26 +367,21 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
         }
       );
 
-      // Ensure the automatically allocated reference ID is attached to the result
+      // Ensure the automatically allocated reference ID and timestamp are attached to the result
       result.id = allocatedId;
+      if (!result.timestamp) {
+        result.timestamp = new Date().toISOString();
+      }
       if (result.inspectorInfo) {
         result.inspectorInfo.badgeId = allocatedId;
       }
 
-      // Attach all captured packaging panels to the result images
-      const allSupporting: string[] = [
-        ...(backImg && backImg !== primaryImg ? [backImg] : []),
-        ...(sideImg && sideImg !== primaryImg ? [sideImg] : []),
-        ...(macroImg && macroImg !== primaryImg ? [macroImg] : []),
-        ...extrasToPass,
-      ];
-
       result.images = {
         pdpImage: primaryImg,
-        backPanelImage: backImg || undefined,
-        sidePanelImage: sideImg || undefined,
-        mrpStampImage: macroImg || undefined,
-        supportingImages: allSupporting,
+        backPanelImage: backImg && backImg !== primaryImg ? backImg : undefined,
+        sidePanelImage: sideImg && sideImg !== primaryImg ? sideImg : undefined,
+        mrpStampImage: macroImg && macroImg !== primaryImg ? macroImg : undefined,
+        supportingImages: extrasToPass.length > 0 ? extrasToPass : undefined,
       };
 
       onScanComplete(result);

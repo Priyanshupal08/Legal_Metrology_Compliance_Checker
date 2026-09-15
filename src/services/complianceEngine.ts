@@ -500,63 +500,228 @@ export function generateLocalRuleEvaluation(
 
 /**
  * Local repository storage for past inspections
- * Strictly stores and retrieves real inspections performed by the user.
- * Eliminates dummy data, benchmark mocks, and pre-seeded records.
+ * Stores and retrieves real inspections performed by the user.
+ * Employs a dual-tier persistence strategy:
+ * 1. Synchronous in-memory cache + quota-safe localStorage (lightweight/resilient against 5MB quotas)
+ * 2. Asynchronous IndexedDB for persistent, high-capacity full-resolution photos
  */
 const REPO_STORAGE_KEY = 'lmpc_inspection_repository_v1';
+const IDB_NAME = 'lmpc_audit_repository_db';
+const IDB_VERSION = 1;
+const IDB_STORE = 'inspections';
 
-const DUMMY_PRODUCT_NAMES = [
-  'shuddh chakki fresh whole wheat atta',
-  'crispy butter crunch cookies',
-  'belgian premium 70% dark chocolate bar',
-  'kachi ghani cold pressed mustard oil',
-  'glow radiance night cream tube',
-  'eco-clean active bio detergent powder',
-];
+let memoryInspections: InspectionResult[] | null = null;
+type HistoryListener = (inspections: InspectionResult[]) => void;
+const historyListeners = new Set<HistoryListener>();
 
-const DUMMY_BRANDS = [
-  'kisan golden gold',
-  'royal crunch bakery',
-  'chocoartisan delights',
-  'pavitra dhara mills',
-  'dermaglow laboratories',
-  'swachh bharat cleaners',
-];
+export function subscribeToInspectionUpdates(listener: HistoryListener): () => void {
+  historyListeners.add(listener);
+  return () => {
+    historyListeners.delete(listener);
+  };
+}
+
+function notifyHistoryListeners(updated: InspectionResult[]): void {
+  historyListeners.forEach((fn) => {
+    try {
+      fn(updated);
+    } catch (e) {
+      console.error('History listener callback error:', e);
+    }
+  });
+}
+
+function openInspectionsDb(): Promise<IDBDatabase | null> {
+  if (typeof window === 'undefined' || !window.indexedDB) {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    try {
+      const request = window.indexedDB.open(IDB_NAME, IDB_VERSION);
+      request.onupgradeneeded = (e: IDBVersionChangeEvent) => {
+        const db = (e.target as IDBOpenDBRequest).result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          db.createObjectStore(IDB_STORE, { keyPath: 'id' });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = (err) => {
+        console.warn('IndexedDB unavailable, falling back to localStorage:', err);
+        resolve(null);
+      };
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function saveToIndexedDb(item: InspectionResult): Promise<void> {
+  const db = await openInspectionsDb();
+  if (!db) return;
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      const store = tx.objectStore(IDB_STORE);
+      store.put(item);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
+async function loadAllFromIndexedDb(): Promise<InspectionResult[]> {
+  const db = await openInspectionsDb();
+  if (!db) return [];
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const store = tx.objectStore(IDB_STORE);
+      const req = store.getAll();
+      req.onsuccess = () => {
+        const results = req.result;
+        if (Array.isArray(results)) {
+          results.sort((a, b) => {
+            const tA = new Date(a.timestamp || 0).getTime();
+            const tB = new Date(b.timestamp || 0).getTime();
+            return tB - tA;
+          });
+          resolve(results.filter((x) => !isDummyInspection(x)));
+        } else {
+          resolve([]);
+        }
+      };
+      req.onerror = () => resolve([]);
+    } catch {
+      resolve([]);
+    }
+  });
+}
+
+async function deleteFromIndexedDb(id: string): Promise<void> {
+  const db = await openInspectionsDb();
+  if (!db) return;
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      const store = tx.objectStore(IDB_STORE);
+      store.delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
+async function clearIndexedDb(): Promise<void> {
+  const db = await openInspectionsDb();
+  if (!db) return;
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      const store = tx.objectStore(IDB_STORE);
+      store.clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
 
 /**
- * Checks whether an inspection record is a simulated dummy / benchmark product
+ * Quota-Safe LocalStorage serialization with mathematical degradation
+ * Prevents DOMException: QuotaExceededError when photos are attached
+ */
+function safeSaveToLocalStorage(key: string, list: InspectionResult[]): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+
+  // Level 1: Retain primary images for latest 3 items; strip heavy auxiliary arrays
+  try {
+    const level1 = list.slice(0, 100).map((item, idx) => {
+      if (idx < 3) {
+        return {
+          ...item,
+          images: {
+            ...item.images,
+            supportingImages: undefined,
+          },
+        };
+      }
+      const pdp = item.images?.pdpImage;
+      const keepPdp = pdp && pdp.length < 200000 ? pdp : undefined;
+      return {
+        ...item,
+        images: {
+          pdpImage: keepPdp,
+          backPanelImage: undefined,
+          sidePanelImage: undefined,
+          mrpStampImage: undefined,
+          supportingImages: undefined,
+        },
+      };
+    });
+    localStorage.setItem(key, JSON.stringify(level1));
+    return;
+  } catch (err1) {
+    console.warn('localStorage level 1 write exceeded quota, attempting compact write:', err1);
+  }
+
+  // Level 2: Strip all base64 images from localStorage (metadata, declarations, scores, findings 100% saved)
+  try {
+    const level2 = list.slice(0, 60).map((item) => ({
+      ...item,
+      images: {
+        pdpImage: undefined,
+        backPanelImage: undefined,
+        sidePanelImage: undefined,
+        mrpStampImage: undefined,
+        supportingImages: undefined,
+      },
+    }));
+    localStorage.setItem(key, JSON.stringify(level2));
+    return;
+  } catch (err2) {
+    console.warn('localStorage level 2 write exceeded quota, trimming to 30 items:', err2);
+  }
+
+  // Level 3: Keep 30 items without images
+  try {
+    const level3 = list.slice(0, 30).map((item) => ({
+      ...item,
+      images: {},
+    }));
+    localStorage.setItem(key, JSON.stringify(level3));
+  } catch (err3) {
+    console.error('Critical localStorage write failure:', err3);
+  }
+}
+
+/**
+ * Checks whether an inspection record is a simulated benchmark preset
  * rather than a real investigation conducted by the user.
  */
 export function isDummyInspection(item: Partial<InspectionResult> | null | undefined): boolean {
   if (!item || !item.id) return false;
-  
-  // Benchmark or sample prefix IDs
+
+  // Real user scans and official inspector records are never dummy
+  if (
+    item.id.startsWith('INSP-') ||
+    item.id.startsWith('insp-') ||
+    item.id.startsWith('LMI-')
+  ) {
+    return false;
+  }
+
+  // Benchmark or sample mock prefix IDs
   if (
     item.id.startsWith('BENCHMARK-') ||
     item.id.startsWith('sample-') ||
     item.id.startsWith('SAMPLE-') ||
-    item.id.startsWith('MOCK-')
-  ) {
-    return true;
-  }
-
-  // Pre-seeded static sample names
-  const pName = (item.productName || '').toLowerCase().trim();
-  if (DUMMY_PRODUCT_NAMES.some((dName) => pName.includes(dName))) {
-    return true;
-  }
-
-  // Pre-seeded static sample brands
-  const bName = (item.brandName || '').toLowerCase().trim();
-  if (DUMMY_BRANDS.some((dBrand) => bName.includes(dBrand))) {
-    return true;
-  }
-
-  // Static mock vector SVGs generated for demo presets
-  if (
-    item.images?.pdpImage &&
-    typeof item.images.pdpImage === 'string' &&
-    item.images.pdpImage.startsWith('data:image/svg+xml')
+    item.id.startsWith('MOCK-') ||
+    item.id.startsWith('DEMO-')
   ) {
     return true;
   }
@@ -565,42 +730,102 @@ export function isDummyInspection(item: Partial<InspectionResult> | null | undef
 }
 
 export function getSavedInspections(): InspectionResult[] {
+  if (memoryInspections !== null) {
+    return [...memoryInspections];
+  }
+
+  let loaded: InspectionResult[] = [];
   try {
-    const raw = localStorage.getItem(REPO_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: InspectionResult[] = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-
-    // Filter out any dummy data or pre-seeded benchmark records
-    const realInspections = parsed.filter((item) => !isDummyInspection(item));
-
-    // If dummy data was found in localStorage, immediately overwrite with only real data
-    if (realInspections.length !== parsed.length) {
-      localStorage.setItem(REPO_STORAGE_KEY, JSON.stringify(realInspections));
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(REPO_STORAGE_KEY) : null;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        loaded = parsed.filter((item) => !isDummyInspection(item));
+      }
     }
-
-    return realInspections;
   } catch (err) {
     console.error('Failed to read inspection history from localStorage', err);
-    return [];
   }
+
+  memoryInspections = loaded;
+
+  // Background hydration from IndexedDB (which preserves full-resolution photos)
+  if (typeof window !== 'undefined' && window.indexedDB) {
+    loadAllFromIndexedDb().then((idbItems) => {
+      if (idbItems && idbItems.length > 0) {
+        const map = new Map<string, InspectionResult>();
+        idbItems.forEach((it) => map.set(it.id, it));
+        (memoryInspections || []).forEach((it) => {
+          if (!map.has(it.id)) {
+            map.set(it.id, it);
+          } else {
+            const idbIt = map.get(it.id)!;
+            map.set(it.id, {
+              ...idbIt,
+              ...it,
+              images: {
+                ...idbIt.images,
+                ...it.images,
+                pdpImage: idbIt.images?.pdpImage || it.images?.pdpImage,
+                backPanelImage: idbIt.images?.backPanelImage || it.images?.backPanelImage,
+                sidePanelImage: idbIt.images?.sidePanelImage || it.images?.sidePanelImage,
+                mrpStampImage: idbIt.images?.mrpStampImage || it.images?.mrpStampImage,
+                supportingImages: idbIt.images?.supportingImages || it.images?.supportingImages,
+              },
+            });
+          }
+        });
+
+        const merged = Array.from(map.values()).sort((a, b) => {
+          const tA = new Date(a.timestamp || 0).getTime();
+          const tB = new Date(b.timestamp || 0).getTime();
+          return tB - tA;
+        });
+
+        memoryInspections = merged;
+        safeSaveToLocalStorage(REPO_STORAGE_KEY, merged);
+        notifyHistoryListeners(merged);
+      }
+    });
+  }
+
+  return [...memoryInspections];
 }
 
 export function saveInspectionToRepository(inspection: InspectionResult): void {
   try {
-    // Only real investigations conducted by the user are stored
-    if (isDummyInspection(inspection)) {
-      return;
+    if (!inspection || !inspection.id) return;
+    if (isDummyInspection(inspection)) return;
+
+    if (memoryInspections === null) {
+      getSavedInspections();
     }
-    const list = getSavedInspections();
+
+    const list = memoryInspections ? [...memoryInspections] : [];
     const existingIndex = list.findIndex((x) => x.id === inspection.id);
     if (existingIndex >= 0) {
       list[existingIndex] = inspection;
     } else {
       list.unshift(inspection);
     }
-    // keep up to 100 real records
-    localStorage.setItem(REPO_STORAGE_KEY, JSON.stringify(list.slice(0, 100)));
+
+    // Sort descending by timestamp so latest investigation is always first
+    list.sort((a, b) => {
+      const tA = new Date(a.timestamp || 0).getTime();
+      const tB = new Date(b.timestamp || 0).getTime();
+      return tB - tA;
+    });
+
+    memoryInspections = list;
+
+    // Synchronous quota-safe save to localStorage
+    safeSaveToLocalStorage(REPO_STORAGE_KEY, list);
+
+    // Asynchronous full persistence to IndexedDB
+    saveToIndexedDb(inspection).catch((e) => console.warn('IndexedDB save background notice:', e));
+
+    // Notify all React listeners
+    notifyHistoryListeners(list);
   } catch (err) {
     console.error('Failed to save inspection', err);
   }
@@ -608,8 +833,14 @@ export function saveInspectionToRepository(inspection: InspectionResult): void {
 
 export function deleteInspectionFromRepository(id: string): void {
   try {
-    const list = getSavedInspections().filter((x) => x.id !== id);
-    localStorage.setItem(REPO_STORAGE_KEY, JSON.stringify(list));
+    if (memoryInspections === null) {
+      getSavedInspections();
+    }
+    const list = (memoryInspections || []).filter((x) => x.id !== id);
+    memoryInspections = list;
+    safeSaveToLocalStorage(REPO_STORAGE_KEY, list);
+    deleteFromIndexedDb(id).catch((e) => console.warn('IndexedDB delete notice:', e));
+    notifyHistoryListeners(list);
   } catch (err) {
     console.error('Failed to delete inspection', err);
   }
@@ -617,7 +848,12 @@ export function deleteInspectionFromRepository(id: string): void {
 
 export function clearAllInspections(): void {
   try {
-    localStorage.removeItem(REPO_STORAGE_KEY);
+    memoryInspections = [];
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.removeItem(REPO_STORAGE_KEY);
+    }
+    clearIndexedDb().catch((e) => console.warn('IndexedDB clear notice:', e));
+    notifyHistoryListeners([]);
   } catch (err) {
     console.error('Failed to clear inspection repository', err);
   }
